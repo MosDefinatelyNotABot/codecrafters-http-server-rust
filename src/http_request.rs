@@ -24,7 +24,7 @@ pub(crate) fn parse_request(request: &str) -> HttpRequest {
                 method = parts.first().map(|s| s.to_string());
                 target_path = if parts
                     .get(1)
-                    .is_some_and(|s| s.starts_with("/") & !s.strip_prefix("/").unwrap().is_empty())
+                    .is_some_and(|s| s.starts_with("/") && !s.strip_prefix("/").unwrap().is_empty())
                 {
                     Some(parts.get(1).unwrap().to_string())
                 } else {
@@ -100,5 +100,24 @@ mod tests {
         assert!(req._http_version.is_none());
         assert!(req.headers.is_none());
         assert!(req.body.is_none());
+    }
+
+    #[test]
+    fn root_path_yields_no_target_path() {
+        let raw = "GET / HTTP/1.1\r\nHost: localhost";
+        let req = parse_request(raw);
+
+        assert_eq!(req.method.as_deref(), Some("GET"));
+        assert!(req.target_path.is_none());
+        assert_eq!(req._http_version.as_deref(), Some("HTTP/1.1"));
+    }
+
+    #[test]
+    fn path_without_leading_slash_yields_no_target_path() {
+        let raw = "GET noslash HTTP/1.1";
+        let req = parse_request(raw);
+
+        assert_eq!(req.method.as_deref(), Some("GET"));
+        assert!(req.target_path.is_none());
     }
 }
