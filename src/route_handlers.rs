@@ -1,6 +1,6 @@
 use crate::{http_request::HttpRequest, http_response::HttpResponse, path_splitter::path_spilter};
 
-pub(crate) type RequestHandler = Box<dyn Fn(&HttpRequest) -> String>;
+pub(crate) type RequestHandler = Box<dyn Fn(&HttpRequest) -> String + Send + Sync>;
 
 pub(crate) fn root_handler(_: &HttpRequest) -> String {
     // doubles as a health check
@@ -49,6 +49,6 @@ pub(crate) fn user_agent_handler(request: &HttpRequest) -> String {
 
         http_response.get_response()
     } else {
-        error_handler(&request)
+        error_handler(request)
     }
 }

@@ -8,47 +8,49 @@ pub(crate) struct HttpRequest {
     pub _body: Option<String>,
 }
 
-pub(crate) fn parse_request(request: &str) -> HttpRequest {
-    let chunks = request.split("\r\n");
+impl HttpRequest {
+    pub(crate) fn parse_request(request: &str) -> HttpRequest {
+        let chunks = request.split("\r\n");
 
-    let mut method = None;
-    let mut target_path = None;
-    let mut http_version = None;
-    let mut headers: HashMap<String, String> = HashMap::new();
-    let mut body = None;
-    let mut in_headers = true;
+        let mut method = None;
+        let mut target_path = None;
+        let mut http_version = None;
+        let mut headers: HashMap<String, String> = HashMap::new();
+        let mut body = None;
+        let mut in_headers = true;
 
-    for (idx, ch) in chunks.enumerate() {
-        if idx == 0 {
-            let parts: Vec<&str> = ch.split(' ').collect();
-            method = parts.first().map(|s| s.to_string());
-            target_path = if parts
-                .get(1)
-                .is_some_and(|s| s.starts_with("/") && !s.strip_prefix("/").unwrap().is_empty())
-            {
-                Some(parts.get(1).unwrap().to_string())
+        for (idx, ch) in chunks.enumerate() {
+            if idx == 0 {
+                let parts: Vec<&str> = ch.split(' ').collect();
+                method = parts.first().map(|s| s.to_string());
+                target_path = if parts
+                    .get(1)
+                    .is_some_and(|s| s.starts_with("/") && !s.strip_prefix("/").unwrap().is_empty())
+                {
+                    Some(parts.get(1).unwrap().to_string())
+                } else {
+                    None
+                };
+                http_version = parts.get(2).map(|s| s.to_string());
+            } else if in_headers {
+                if ch.is_empty() {
+                    in_headers = false;
+                } else if let Some((key, value)) = ch.split_once(": ") {
+                    headers.insert(key.to_string(), value.to_string());
+                }
             } else {
-                None
-            };
-            http_version = parts.get(2).map(|s| s.to_string());
-        } else if in_headers {
-            if ch.is_empty() {
-                in_headers = false;
-            } else if let Some((key, value)) = ch.split_once(": ") {
-                headers.insert(key.to_string(), value.to_string());
+                body = Some(ch.to_string());
+                break;
             }
-        } else {
-            body = Some(ch.to_string());
-            break;
         }
-    }
 
-    HttpRequest {
-        _method: method,
-        _target_path: target_path,
-        _http_version: http_version,
-        _headers: headers,
-        _body: body,
+        HttpRequest {
+            _method: method,
+            _target_path: target_path,
+            _http_version: http_version,
+            _headers: headers,
+            _body: body,
+        }
     }
 }
 
