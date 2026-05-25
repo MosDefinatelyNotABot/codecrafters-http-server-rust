@@ -1,6 +1,6 @@
 use std::io::Error;
 
-pub(crate) fn path_spilter(path: &String) -> Result<(String, Vec<String>), Error> {
+pub(crate) fn path_spilter(path: &str) -> Result<(String, Vec<String>), Error> {
     // seperates the base path and path chunks from a URL path
     if let Some(path_clean) = path.strip_prefix("/") {
         let chunks: Vec<String> = path_clean.split('/').map(|c| c.to_string()).collect();
@@ -9,16 +9,10 @@ pub(crate) fn path_spilter(path: &String) -> Result<(String, Vec<String>), Error
                 let path_chunks: Vec<String> = chunks[1..].iter().map(|c| c.to_string()).collect();
                 Ok((format!("/{}", base_path), path_chunks))
             }
-            _ => Err(Error::new(
-                std::io::ErrorKind::Other,
-                "Path must start with '/'",
-            )),
+            _ => Err(Error::other("Path must start with '/'")),
         }
     } else {
-        Err(Error::new(
-            std::io::ErrorKind::Other,
-            "Path must start with '/'",
-        ))
+        Err(Error::other("Path must start with '/'"))
     }
 }
 
