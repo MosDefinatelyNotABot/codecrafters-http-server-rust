@@ -61,7 +61,7 @@ mod tests {
     #[test]
     fn parses_well_formed_request() {
         let raw = "GET /index.html HTTP/1.1\r\nHost: localhost\r\nUser-Agent: foobar/1.2.3\r\n\r\nHello body";
-        let req = parse_request(raw);
+        let req = HttpRequest::parse_request(raw);
 
         assert_eq!(req._method.as_deref(), Some("GET"));
         assert_eq!(req._target_path.as_deref(), Some("/index.html"));
@@ -80,7 +80,7 @@ mod tests {
     #[test]
     fn parses_multiple_headers() {
         let raw = "GET /index.html HTTP/1.1\r\nHost: localhost\r\nUser-Agent: foobar/1.2.3\r\nAccept: */*\r\n\r\n";
-        let req = parse_request(raw);
+        let req = HttpRequest::parse_request(raw);
 
         assert_eq!(
             req._headers.get("Host").map(|s| s.as_str()),
@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn parses_request_line_only() {
         let raw = "POST /submit HTTP/1.1";
-        let req = parse_request(raw);
+        let req = HttpRequest::parse_request(raw);
 
         assert_eq!(req._method.as_deref(), Some("POST"));
         assert_eq!(req._target_path.as_deref(), Some("/submit"));
@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn handles_malformed_request_line() {
         let raw = "BADREQUEST\r\nHost: localhost";
-        let req = parse_request(raw);
+        let req = HttpRequest::parse_request(raw);
 
         assert_eq!(req._method.as_deref(), Some("BADREQUEST"));
         assert!(req._target_path.is_none());
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn handles_empty_input() {
-        let req = parse_request("");
+        let req = HttpRequest::parse_request("");
 
         assert_eq!(req._method.as_deref(), Some(""));
         assert!(req._target_path.is_none());
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn root_path_yields_no_target_path() {
         let raw = "GET / HTTP/1.1\r\nHost: localhost";
-        let req = parse_request(raw);
+        let req = HttpRequest::parse_request(raw);
 
         assert_eq!(req._method.as_deref(), Some("GET"));
         assert!(req._target_path.is_none());
@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn path_without_leading_slash_yields_no_target_path() {
         let raw = "GET noslash HTTP/1.1";
-        let req = parse_request(raw);
+        let req = HttpRequest::parse_request(raw);
 
         assert_eq!(req._method.as_deref(), Some("GET"));
         assert!(req._target_path.is_none());

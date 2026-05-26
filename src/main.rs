@@ -1,67 +1,53 @@
+mod file_utils;
 mod http_request;
 mod http_response;
 mod path_splitter;
 mod route_handlers;
 
+use file_utils::{DIR_PATH, get_dir_path};
 use http_request::HttpRequest;
 use path_splitter::path_spilter;
-use route_handlers::{
-    RequestHandler, echo_handler, error_handler, root_handler, user_agent_handler,
-};
-
-use std::collections::HashMap;
-use std::sync::Arc;
+use route_handlers::ROUTES;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
+use std::env;
+
 #[tokio::main]
 async fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
-    // route mapper. maps a path to a handler function.
-    let routes: Arc<HashMap<String, RequestHandler>> = Arc::new(
-        [
-            (
-                "/root".to_string(),
-                Box::new(root_handler) as RequestHandler,
-            ),
-            (
-                "/error".to_string(),
-                Box::new(error_handler) as RequestHandler,
-            ),
-            (
-                "/echo".to_string(),
-                Box::new(echo_handler) as RequestHandler,
-            ),
-            (
-                "/user-agent".to_string(),
-                Box::new(user_agent_handler) as RequestHandler,
-            ),
-        ]
-        .into_iter()
-        .collect(),
-    );
+    // set directory path
+    let args: Vec<String> = env::args().collect();
+    let raw_path = args
+        .windows(2)
+        .find(|w| w[0] == "--directory")
+        .map(|w| w[1].clone())
+        .unwrap_or_else(|| "not set".to_string());
+    if let Some(path) = get_dir_path(&args) {
+        DIR_PATH.set(path).unwrap();
+    }
+
+    println!("Directory Path set to: {}", raw_path);
 
     let listener = TcpListener::bind("127.0.0.1:4221").await.unwrap();
 
     loop {
         let (stream, _) = listener.accept().await.unwrap();
-        let routes = Arc::clone(&routes);
         tokio::spawn(async move {
-            handle_connection(stream, routes).await;
+            handle_connection(stream).await;
         });
     }
 }
 
-async fn handle_connection(stream: TcpStream, routes: Arc<HashMap<String, RequestHandler>>) {
-    // run for each connection to server
+async fn handle_connection(stream: TcpStream) {
+    println!("Accepted connection from: {}", stream.peer_addr().unwrap());
+
     let (reader, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
     let mut request_buffer = String::new();
 
-    // read request line by line. Asynchronously
     loop {
         let mut line = String::new();
         reader
@@ -74,45 +60,29 @@ async fn handle_connection(stream: TcpStream, routes: Arc<HashMap<String, Reques
         request_buffer.push_str(&line);
     }
 
-    // parse request into HttpRequest struct
-    let request = HttpRequest::parse_request(&request_buffer);
+    let request: HttpRequest = HttpRequest::parse_request(&request_buffer);
 
     match request._target_path {
         Some(ref path) => {
-            // check if path is valid
             let (base_path, _path_chunks) = path_spilter(path).unwrap_or_default();
-            // println!("base_path: {}, path_chunks: {:?}", base_path, _path_chunks);
 
-            if routes.contains_key(&base_path) {
-                // path is valid
-                let response =
-                    routes
-                        .get(&base_path)
-                        .expect("Could not find handler function")(&request);
-
-                writer
-                    .write_all(format!("{}\r\n", response).as_bytes())
-                    .await
-                    .expect("Error writing response. :(");
+            let response = if ROUTES.contains_key(&base_path) {
+                ROUTES.get(&base_path).expect("Could not find handler")(&request)
             } else {
-                // path is not valid
-                let err_response =
-                    routes
-                        .get("/error")
-                        .expect("Could not find handler function")(&request);
-                writer
-                    .write_all(format!("{}\r\n", err_response).as_bytes())
-                    .await
-                    .expect("Error writing response. :(");
-            }
-        }
-        None => {
-            // no target path specified.
-            let health_check_resposne = routes[&"/root".to_string()](&request);
+                ROUTES.get("/error").expect("Could not find error handler")(&request)
+            };
+
             writer
-                .write_all(format!("{}\r\n", health_check_resposne).as_bytes())
+                .write_all(format!("{}\r\n", response).as_bytes())
                 .await
                 .expect("Error writing response. :(");
         }
-    };
+        None => {
+            let response = ROUTES[&"/root".to_string()](&request);
+            writer
+                .write_all(format!("{}\r\n", response).as_bytes())
+                .await
+                .expect("Error writing response. :(");
+        }
+    }
 }
