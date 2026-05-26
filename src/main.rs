@@ -9,7 +9,7 @@ use http_request::HttpRequest;
 use path_splitter::path_spilter;
 use route_handlers::ROUTES;
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
 use std::env;
@@ -55,9 +55,26 @@ async fn handle_connection(stream: TcpStream) {
             .await
             .expect("Error reading request. :(");
         if line == "\r\n" || line.is_empty() {
+            request_buffer.push_str(&line);
             break;
         }
         request_buffer.push_str(&line);
+    }
+
+    // read body if Content-Length header is present
+    let content_length: usize = request_buffer
+        .lines()
+        .find_map(|l| l.strip_prefix("Content-Length: "))
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(0);
+
+    if content_length > 0 {
+        let mut body_buf = vec![0u8; content_length];
+        reader
+            .read_exact(&mut body_buf)
+            .await
+            .expect("Error reading body. :(");
+        request_buffer.push_str(&String::from_utf8_lossy(&body_buf));
     }
 
     let request: HttpRequest = HttpRequest::parse_request(&request_buffer);
@@ -65,11 +82,16 @@ async fn handle_connection(stream: TcpStream) {
     match request._target_path {
         Some(ref path) => {
             let (base_path, _path_chunks) = path_spilter(path).unwrap_or_default();
+            let method = request._method.as_deref().unwrap_or("GET").to_string();
 
-            let response = if ROUTES.contains_key(&base_path) {
-                ROUTES.get(&base_path).expect("Could not find handler")(&request)
+            let response = if ROUTES.contains_key(&(base_path.to_owned(), method.to_owned())) {
+                ROUTES
+                    .get(&(base_path, method))
+                    .expect("Could not find handler")(&request)
             } else {
-                ROUTES.get("/error").expect("Could not find error handler")(&request)
+                ROUTES
+                    .get(&("/error".to_string(), "GET".to_string()))
+                    .expect("Could not find error handler")(&request)
             };
 
             writer
@@ -78,7 +100,9 @@ async fn handle_connection(stream: TcpStream) {
                 .expect("Error writing response. :(");
         }
         None => {
-            let response = ROUTES[&"/root".to_string()](&request);
+            let response = ROUTES
+                .get(&("/root".to_string(), "GET".to_string()))
+                .expect("Could not find root handler")(&request);
             writer
                 .write_all(format!("{}\r\n", response).as_bytes())
                 .await

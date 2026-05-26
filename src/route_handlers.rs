@@ -1,52 +1,66 @@
 use std::{collections::HashMap, fs, sync::LazyLock};
 
 use crate::{
-    file_utils::DIR_PATH, http_request::HttpRequest, http_response, path_splitter::path_spilter,
+    file_utils::DIR_PATH,
+    http_request::HttpRequest,
+    http_response::{self},
+    path_splitter::path_spilter,
 };
 
 pub(crate) type RequestHandler = Box<dyn Fn(&HttpRequest) -> String + Send + Sync>;
 
 // route mapper. maps a path to a handler function.
-pub(crate) static ROUTES: LazyLock<HashMap<String, RequestHandler>> = LazyLock::new(|| {
-    [
-        (
-            "/root".to_string(),
-            Box::new(root_handler) as RequestHandler,
-        ),
-        (
-            "/error".to_string(),
-            Box::new(error_handler) as RequestHandler,
-        ),
-        (
-            "/echo".to_string(),
-            Box::new(echo_handler) as RequestHandler,
-        ),
-        (
-            "/user-agent".to_string(),
-            Box::new(user_agent_handler) as RequestHandler,
-        ),
-        (
-            "/files".to_string(),
-            Box::new(file_handler) as RequestHandler,
-        ),
-    ]
-    .into_iter()
-    .collect()
-});
+pub(crate) static ROUTES: LazyLock<HashMap<(String, String), RequestHandler>> =
+    LazyLock::new(|| {
+        [
+            (
+                ("/root".to_string(), "GET".to_string()),
+                Box::new(root_handler_get) as RequestHandler,
+            ),
+            (
+                ("/error".to_string(), "GET".to_string()),
+                Box::new(error_handler_get) as RequestHandler,
+            ),
+            (
+                ("/echo".to_string(), "GET".to_string()),
+                Box::new(echo_handler) as RequestHandler,
+            ),
+            (
+                ("/user-agent".to_string(), "GET".to_string()),
+                Box::new(user_agent_handler_get) as RequestHandler,
+            ),
+            (
+                ("/files".to_string(), "GET".to_string()),
+                Box::new(files_handler_get) as RequestHandler,
+            ),
+            (
+                ("/files".to_string(), "POST".to_string()),
+                Box::new(file_handler_post) as RequestHandler,
+            ),
+        ]
+        .into_iter()
+        .collect()
+    });
 
-pub(crate) fn root_handler(request: &HttpRequest) -> String {
-    println!("[root_handler] request target: {:?}", request._target_path);
+fn root_handler_get(request: &HttpRequest) -> String {
+    println!(
+        "[root_handler_get] request target: {:?}",
+        request._target_path
+    );
     let response = "HTTP/1.1 200 OK\r\n\r\nHealthy".to_string();
-    println!("[root_handler] returning 200 OK");
+    println!("[root_handler_get] returning 200 OK");
     response
 }
 
-pub(crate) fn error_handler(request: &HttpRequest) -> String {
-    println!("[error_handler] request target: {:?}", request._target_path);
+fn error_handler_get(request: &HttpRequest) -> String {
+    println!(
+        "[error_handler_get] request target: {:?}",
+        request._target_path
+    );
     "HTTP/1.1 404 Not Found\r\n\r\n".to_string()
 }
 
-pub(crate) fn echo_handler(request: &HttpRequest) -> String {
+fn echo_handler(request: &HttpRequest) -> String {
     println!("[echo_handler] request target: {:?}", request._target_path);
     let (_base_path, path_chunks) = path_spilter(
         request
@@ -72,15 +86,15 @@ pub(crate) fn echo_handler(request: &HttpRequest) -> String {
     http_response.get_response()
 }
 
-pub(crate) fn user_agent_handler(request: &HttpRequest) -> String {
+fn user_agent_handler_get(request: &HttpRequest) -> String {
     println!(
-        "[user_agent_handler] request target: {:?}",
+        "[user_agent_handler_get] request target: {:?}",
         request._target_path
     );
-    println!("[user_agent_handler] headers: {:?}", request._headers);
+    println!("[user_agent_handler_get] headers: {:?}", request._headers);
 
     if let Some(user_agent) = request._headers.get("User-Agent") {
-        println!("[user_agent_handler] User-Agent: {:?}", user_agent);
+        println!("[user_agent_handler_get] User-Agent: {:?}", user_agent);
 
         let http_response = http_response::HttpResponse {
             http_version: "HTTP/1.1".to_string(),
@@ -94,58 +108,152 @@ pub(crate) fn user_agent_handler(request: &HttpRequest) -> String {
 
         http_response.get_response()
     } else {
-        println!("[user_agent_handler] User-Agent header not found, returning 404");
-        error_handler(request)
+        println!("[user_agent_handler_get] User-Agent header not found, returning 404");
+        error_handler_get(request)
     }
 }
 
-pub(crate) fn file_handler(request: &HttpRequest) -> String {
-    println!("[file_handler] request target: {:?}", request._target_path);
-    if let Some(dir_path) = DIR_PATH.get() {
-        println!("[file_handler] serving from dir: {:?}", dir_path);
-        let (_base_path, path_chunks) = path_spilter(
-            request
-                ._target_path
-                .as_ref()
-                .expect("No path specified. :("),
-        )
-        .unwrap_or_default();
+fn files_handler_get(request: &HttpRequest) -> String {
+    println!(
+        "[files_handler_get] request target: {:?}",
+        request._target_path
+    );
 
-        println!("[file_handler] path_chunks: {:?}", path_chunks);
+    // get path arguments
+    let (_, path_args) = match request._target_path.as_ref() {
+        Some(path) => match path_spilter(path) {
+            Ok(result) => result,
+            Err(_) => {
+                println!("[files_handler_get] failed to parse path, returning 404");
+                return error_handler_get(request);
+            }
+        },
+        None => {
+            println!("[files_handler_get] no path specified, returning 404");
+            return error_handler_get(request);
+        }
+    };
 
-        let requested_fname = dir_path.join(path_chunks.first().expect("No requested file. :("));
+    // check if dir path is set
+    let dir_path = match DIR_PATH.get() {
+        Some(result) => result,
+        None => {
+            println!("[files_handler_get] DIR_PATH not set, returning 404");
+            return error_handler_get(request);
+        }
+    };
 
-        println!(
-            "[file_handler] full path: {:?}, is_file: {}",
-            requested_fname,
-            requested_fname.is_file()
-        );
+    println!("[files_handler_get] path_chunks: {:?}", path_args);
+    let requested_fname = match path_args.first() {
+        Some(fname) => dir_path.join(fname),
+        None => {
+            println!("[files_handler_get] no filename in path, returning 404");
+            return error_handler_get(request);
+        }
+    };
 
-        if requested_fname.is_file() {
-            let bytes = fs::read(&requested_fname).expect("Error reading file. :(");
-            let content_length = bytes.len();
-            println!("[file_handler] read {} bytes", content_length);
+    println!(
+        "[files_handler_get] full path: {:?}, is_file: {}",
+        requested_fname,
+        requested_fname.is_file()
+    );
 
+    // Now send file the file
+    if requested_fname.is_file() {
+        let bytes = fs::read(&requested_fname).expect("Error reading file. :(");
+        let content_length = bytes.len();
+        println!("[files_handler_get] read {} bytes", content_length);
+
+        let http_response = http_response::HttpResponse {
+            http_version: "HTTP/1.1".to_string(),
+            status: "200 OK".to_string(),
+            headers: vec![
+                (
+                    "Content-Type".to_string(),
+                    "application/octet-stream".to_string(),
+                ),
+                ("Content-Length".to_string(), content_length.to_string()),
+            ],
+            body: Some(String::from_utf8_lossy(&bytes).into_owned()),
+        };
+
+        http_response.get_response()
+    } else {
+        println!("[files_handler_get] file not found, returning 404");
+        error_handler_get(request)
+    }
+}
+
+fn file_handler_post(request: &HttpRequest) -> String {
+    println!(
+        "[file_handler_post] request target: {:?}",
+        request._target_path
+    );
+    // get path arguments
+    let (_, path_args) = match request._target_path.as_ref() {
+        Some(path) => match path_spilter(path) {
+            Ok(result) => result,
+            Err(_) => {
+                println!("[file_handler_post] failed to parse path, returning 404");
+                return error_handler_get(request);
+            }
+        },
+        None => {
+            println!("[file_handler_post] no path specified, returning 404");
+            return error_handler_get(request);
+        }
+    };
+
+    // check if dir path is set otherwise fail
+    let dir_path = match DIR_PATH.get() {
+        Some(result) => result,
+        None => {
+            println!("[file_handler_post] DIR_PATH not set, returning 404");
+            return error_handler_get(request);
+        }
+    };
+
+    // get the file name
+    let file_path = match path_args.first() {
+        Some(result) => dir_path.join(result),
+        None => {
+            println!("[file_handler_post] no filename in path, returning 404");
+            return error_handler_get(request);
+        }
+    };
+
+    // make sure request body is none empty
+    let file_contents = match request._body.to_owned() {
+        Some(result) => result,
+        None => {
+            println!("[file_handler_post] request body is empty, returning 404");
+            return error_handler_get(request);
+        }
+    };
+
+    println!(
+        "[file_handler_post] writing {} bytes to {:?}.",
+        file_contents.len(),
+        &file_path
+    );
+
+    match fs::write(file_path, file_contents) {
+        Ok(_) => {
             let http_response = http_response::HttpResponse {
                 http_version: "HTTP/1.1".to_string(),
-                status: "200 OK".to_string(),
-                headers: vec![
-                    (
-                        "Content-Type".to_string(),
-                        "application/octet-stream".to_string(),
-                    ),
-                    ("Content-Length".to_string(), content_length.to_string()),
-                ],
-                body: Some(String::from_utf8_lossy(&bytes).into_owned()),
+                status: "201 Created".to_string(),
+                headers: vec![],
+                body: None,
             };
 
             http_response.get_response()
-        } else {
-            println!("[file_handler] file not found, returning 404");
-            error_handler(request)
         }
-    } else {
-        println!("[file_handler] DIR_PATH not set, returning 404");
-        error_handler(request)
+        Err(e) => {
+            println!(
+                "[file_handler_post] failed to write file: {}, returning 404",
+                e
+            );
+            error_handler_get(request)
+        }
     }
 }
