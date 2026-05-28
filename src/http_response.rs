@@ -28,10 +28,14 @@ impl HttpResponse {
             .collect::<Vec<_>>()
             .join("\r\n");
 
-        let head = format!(
-            "{} {}\r\n{}\r\n\r\n",
-            self.http_version, self.status, headers
-        );
+        let head = if headers.is_empty() {
+            format!("{} {}\r\n\r\n", self.http_version, self.status)
+        } else {
+            format!(
+                "{} {}\r\n{}\r\n\r\n",
+                self.http_version, self.status, headers
+            )
+        };
 
         let mut response = head.into_bytes();
         if let Some(body) = &self.body {

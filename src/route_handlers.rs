@@ -49,9 +49,8 @@ fn root_handler_get(request: &HttpRequest) -> HttpResponse {
     HttpResponse {
         http_version: "HTTP/1.1".to_string(),
         status: "200 OK".to_string(),
-        headers: HashMap::new(),
-        // body: Some(b"Healthy".to_vec()),
-        body: None,
+        headers: HashMap::from([("Content-Length".to_string(), b"Healthy".len().to_string())]),
+        body: Some(b"Healthy".to_vec()),
     }
 }
 

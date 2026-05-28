@@ -17,12 +17,18 @@ pub(crate) async fn fetch_request_str(
     let mut request_line = String::new();
     let mut headers_buffer = String::new();
 
-    // read request line
-    reader
-        .as_mut()
-        .read_line(&mut request_line)
-        .await
-        .expect("Error reading request line. :(");
+    // read request line, skipping any leading blank lines (RFC 7230 §3.5)
+    loop {
+        let bytes_read = reader
+            .as_mut()
+            .read_line(&mut request_line)
+            .await
+            .expect("Error reading request line. :(");
+        if bytes_read == 0 || (request_line != "\r\n" && request_line != "\n") {
+            break;
+        }
+        request_line.clear();
+    }
 
     // read headers until blank line
     loop {
