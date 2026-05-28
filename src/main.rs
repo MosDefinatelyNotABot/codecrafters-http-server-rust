@@ -68,6 +68,7 @@ async fn handle_connection(stream: TcpStream) {
         let request: HttpRequest = HttpRequest::parse_request(&request_line, &headers_buffer, body);
 
         println!("[main] Request headers: {:?}", request._headers);
+        println!("[main] Request headers: {:?}", request._target_path);
 
         let close_after_response = request
             ._headers
@@ -77,7 +78,11 @@ async fn handle_connection(stream: TcpStream) {
         // get resposne
         let mut http_response: HttpResponse = match request._target_path {
             Some(ref path) => {
-                let (base_path, _path_chunks) = path_spilter(path).unwrap_or_default();
+                let (base_path, path_args) = path_spilter(path).unwrap_or_default();
+                println!(
+                    "[main] base: {:?} --- path_args: {:?}",
+                    base_path, path_args
+                );
                 let method = request._method.as_deref().unwrap_or("GET").to_string();
                 if ROUTES.contains_key(&(base_path.to_owned(), method.to_owned())) {
                     ROUTES
@@ -137,20 +142,31 @@ async fn handle_connection(stream: TcpStream) {
             );
         }
 
-        println!("[main] resposne headers: {:?}", http_response.headers);
-
-        // send response
-        writer
-            .write_all(http_response.get_response().as_slice())
-            .await
-            .expect("Error writing response. :(");
+        println!("[main] response headers: {:?}", http_response.headers);
 
         if close_after_response {
+            // close the connection with client
             println!(
                 "[main] Closing connection after response from: {}",
                 &client_addr
             );
+            http_response
+                .headers
+                .insert("Connection".to_string(), "close".to_string());
+
+            // send response
+            writer
+                .write_all(http_response.get_response().as_slice())
+                .await
+                .expect("Error writing response. :(");
+
             break;
+        } else {
+            // send response and keep connection open
+            writer
+                .write_all(http_response.get_response().as_slice())
+                .await
+                .expect("Error writing response. :(");
         }
     }
 }
