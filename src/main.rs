@@ -1,3 +1,4 @@
+mod compression_utils;
 mod file_utils;
 mod http_request;
 mod http_response;
@@ -13,6 +14,8 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
 use std::env;
+
+use crate::http_response::HttpResponse;
 
 #[tokio::main]
 async fn main() {
@@ -48,6 +51,7 @@ async fn handle_connection(stream: TcpStream) {
     let mut reader = BufReader::new(reader);
     let mut request_buffer = String::new();
 
+    // read request line and headers
     loop {
         let mut line = String::new();
         reader
@@ -77,14 +81,15 @@ async fn handle_connection(stream: TcpStream) {
         request_buffer.push_str(&String::from_utf8_lossy(&body_buf));
     }
 
+    // parse request
     let request: HttpRequest = HttpRequest::parse_request(&request_buffer);
 
-    match request._target_path {
+    // get resposne
+    let mut http_response: HttpResponse = match request._target_path {
         Some(ref path) => {
             let (base_path, _path_chunks) = path_spilter(path).unwrap_or_default();
             let method = request._method.as_deref().unwrap_or("GET").to_string();
-
-            let response = if ROUTES.contains_key(&(base_path.to_owned(), method.to_owned())) {
+            if ROUTES.contains_key(&(base_path.to_owned(), method.to_owned())) {
                 ROUTES
                     .get(&(base_path, method))
                     .expect("Could not find handler")(&request)
@@ -92,21 +97,52 @@ async fn handle_connection(stream: TcpStream) {
                 ROUTES
                     .get(&("/error".to_string(), "GET".to_string()))
                     .expect("Could not find error handler")(&request)
-            };
+            }
+        }
+        None => ROUTES
+            .get(&("/root".to_string(), "GET".to_string()))
+            .expect("Could not find root handler")(&request),
+    };
 
-            writer
-                .write_all(format!("{}\r\n", response).as_bytes())
-                .await
-                .expect("Error writing response. :(");
-        }
-        None => {
-            let response = ROUTES
-                .get(&("/root".to_string(), "GET".to_string()))
-                .expect("Could not find root handler")(&request);
-            writer
-                .write_all(format!("{}\r\n", response).as_bytes())
-                .await
-                .expect("Error writing response. :(");
-        }
+    // compress body if necessary
+    if let Some(compression_method) = request._headers.get("Accept-Encoding").map(|v| v.as_str())
+        && compression_utils::COMPRESSION_METHODS.contains_key(compression_method)
+    {
+        println!("[main] compressing body");
+
+        http_response.body = Some(format!(
+            "{:?}",
+            compression_utils::compress_data(
+                http_response
+                    .body
+                    .as_ref()
+                    .map(|b| b.as_bytes())
+                    .unwrap_or_default(),
+                Some(compression_method)
+            )
+        ));
+
+        // add content encoding header
+        http_response.headers.push((
+            "Content-Encoding".to_string(),
+            compression_method.to_owned(),
+        ));
+
+        // update content length header
+        let compressed_content_length = http_response
+            .body
+            .as_ref()
+            .map(|b| b.len().to_string())
+            .unwrap_or_default();
+
+        http_response
+            .headers
+            .push(("Content-Length".to_string(), compressed_content_length));
     }
+
+    // send response
+    writer
+        .write_all(http_response.get_response().as_bytes())
+        .await
+        .expect("Error writing response. :(");
 }

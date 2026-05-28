@@ -3,11 +3,11 @@ use std::{collections::HashMap, fs, sync::LazyLock};
 use crate::{
     file_utils::DIR_PATH,
     http_request::HttpRequest,
-    http_response::{self},
+    http_response::{self, HttpResponse},
     path_splitter::path_spilter,
 };
 
-pub(crate) type RequestHandler = Box<dyn Fn(&HttpRequest) -> String + Send + Sync>;
+pub(crate) type RequestHandler = Box<dyn Fn(&HttpRequest) -> HttpResponse + Send + Sync>;
 
 // route mapper. maps a path to a handler function.
 pub(crate) static ROUTES: LazyLock<HashMap<(String, String), RequestHandler>> =
@@ -42,25 +42,35 @@ pub(crate) static ROUTES: LazyLock<HashMap<(String, String), RequestHandler>> =
         .collect()
     });
 
-fn root_handler_get(request: &HttpRequest) -> String {
+fn root_handler_get(request: &HttpRequest) -> HttpResponse {
     println!(
-        "[root_handler_get] request target: {:?}",
+        "[root_handler_get] root path handler returning healthy. request target: {:?}",
         request._target_path
     );
-    let response = "HTTP/1.1 200 OK\r\n\r\nHealthy".to_string();
-    println!("[root_handler_get] returning 200 OK");
-    response
+
+    HttpResponse {
+        http_version: "HTTP/1.1".to_string(),
+        status: "200 OK".to_string(),
+        headers: vec![],
+        body: Some("Healthy".to_string()),
+    }
 }
 
-fn error_handler_get(request: &HttpRequest) -> String {
+fn error_handler_get(request: &HttpRequest) -> HttpResponse {
     println!(
         "[error_handler_get] request target: {:?}",
         request._target_path
     );
-    "HTTP/1.1 404 Not Found\r\n\r\n".to_string()
+
+    HttpResponse {
+        http_version: "HTTP/1.1".to_string(),
+        status: "404 Not Found".to_string(),
+        headers: vec![],
+        body: None,
+    }
 }
 
-fn echo_handler(request: &HttpRequest) -> String {
+fn echo_handler(request: &HttpRequest) -> HttpResponse {
     println!("[echo_handler] request target: {:?}", request._target_path);
     let (_base_path, path_chunks) = path_spilter(
         request
@@ -73,7 +83,7 @@ fn echo_handler(request: &HttpRequest) -> String {
     let body = path_chunks.first().cloned().unwrap_or_default();
     println!("[echo_handler] echoing body: {:?}", body);
 
-    let http_response = http_response::HttpResponse {
+    HttpResponse {
         http_version: "HTTP/1.1".to_string(),
         status: "200 OK".to_string(),
         headers: vec![
@@ -81,12 +91,10 @@ fn echo_handler(request: &HttpRequest) -> String {
             ("Content-Length".to_string(), body.len().to_string()),
         ],
         body: Some(body),
-    };
-
-    http_response.get_response()
+    }
 }
 
-fn user_agent_handler_get(request: &HttpRequest) -> String {
+fn user_agent_handler_get(request: &HttpRequest) -> HttpResponse {
     println!(
         "[user_agent_handler_get] request target: {:?}",
         request._target_path
@@ -106,14 +114,14 @@ fn user_agent_handler_get(request: &HttpRequest) -> String {
             body: Some(user_agent.to_owned()),
         };
 
-        http_response.get_response()
+        http_response
     } else {
         println!("[user_agent_handler_get] User-Agent header not found, returning 404");
         error_handler_get(request)
     }
 }
 
-fn files_handler_get(request: &HttpRequest) -> String {
+fn files_handler_get(request: &HttpRequest) -> HttpResponse {
     println!(
         "[files_handler_get] request target: {:?}",
         request._target_path
@@ -177,14 +185,14 @@ fn files_handler_get(request: &HttpRequest) -> String {
             body: Some(String::from_utf8_lossy(&bytes).into_owned()),
         };
 
-        http_response.get_response()
+        http_response
     } else {
         println!("[files_handler_get] file not found, returning 404");
         error_handler_get(request)
     }
 }
 
-fn file_handler_post(request: &HttpRequest) -> String {
+fn file_handler_post(request: &HttpRequest) -> HttpResponse {
     println!(
         "[file_handler_post] request target: {:?}",
         request._target_path
@@ -246,7 +254,7 @@ fn file_handler_post(request: &HttpRequest) -> String {
                 body: None,
             };
 
-            http_response.get_response()
+            http_response
         }
         Err(e) => {
             println!(
