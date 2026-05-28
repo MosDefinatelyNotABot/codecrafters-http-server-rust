@@ -50,7 +50,8 @@ fn root_handler_get(request: &HttpRequest) -> HttpResponse {
         http_version: "HTTP/1.1".to_string(),
         status: "200 OK".to_string(),
         headers: HashMap::new(),
-        body: Some(b"Healthy".to_vec()),
+        // body: Some(b"Healthy".to_vec()),
+        body: None,
     }
 }
 
