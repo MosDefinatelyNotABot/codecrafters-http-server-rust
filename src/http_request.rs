@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, pin::Pin};
+
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt};
 
 pub(crate) struct HttpRequest {
     pub _method: Option<String>,
@@ -8,41 +10,79 @@ pub(crate) struct HttpRequest {
     pub _body: Option<String>,
 }
 
-impl HttpRequest {
-    pub(crate) fn parse_request(request: &str) -> HttpRequest {
-        let chunks = request.split("\r\n");
+/// Reads the request from the socket, returning (request_line, headers, body).
+pub(crate) async fn fetch_request_str(
+    mut reader: Pin<&mut impl AsyncBufRead>,
+) -> (String, String, Option<String>) {
+    let mut request_line = String::new();
+    let mut headers_buffer = String::new();
 
-        let mut method = None;
-        let mut target_path = None;
-        let mut http_version = None;
-        let mut headers: HashMap<String, String> = HashMap::new();
-        let mut body = None;
-        let mut in_headers = true;
+    // read request line
+    reader
+        .as_mut()
+        .read_line(&mut request_line)
+        .await
+        .expect("Error reading request line. :(");
 
-        for (idx, ch) in chunks.enumerate() {
-            if idx == 0 {
-                let parts: Vec<&str> = ch.split(' ').collect();
-                method = parts.first().map(|s| s.to_string());
-                target_path = if parts
-                    .get(1)
-                    .is_some_and(|s| s.starts_with("/") && !s.strip_prefix("/").unwrap().is_empty())
-                {
-                    Some(parts.get(1).unwrap().to_string())
-                } else {
-                    None
-                };
-                http_version = parts.get(2).map(|s| s.to_string());
-            } else if in_headers {
-                if ch.is_empty() {
-                    in_headers = false;
-                } else if let Some((key, value)) = ch.split_once(": ") {
-                    headers.insert(key.to_string(), value.to_string());
-                }
-            } else {
-                body = Some(ch.to_string());
-                break;
-            }
+    // read headers until blank line
+    loop {
+        let mut line = String::new();
+        reader
+            .as_mut()
+            .read_line(&mut line)
+            .await
+            .expect("Error reading headers. :(");
+        if line == "\r\n" || line.is_empty() {
+            break;
         }
+        headers_buffer.push_str(&line);
+    }
+
+    // read body if Content-Length header is present
+    let content_length: usize = headers_buffer
+        .lines()
+        .find_map(|l| l.strip_prefix("Content-Length: "))
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(0);
+
+    let body = if content_length > 0 {
+        let mut body_buf = vec![0u8; content_length];
+        reader
+            .as_mut()
+            .read_exact(&mut body_buf)
+            .await
+            .expect("Error reading body. :(");
+        Some(String::from_utf8_lossy(&body_buf).into_owned())
+    } else {
+        None
+    };
+
+    (request_line, headers_buffer, body)
+}
+
+/// Struct representing an HTTP request.
+impl HttpRequest {
+    /// Parses the output of `fetch_request_str` into an `HttpRequest`.
+    pub(crate) fn parse_request(
+        req_line: &str,
+        headers_str: &str,
+        body: Option<String>,
+    ) -> HttpRequest {
+        // parse request line
+        let parts: Vec<&str> = req_line.trim_end().split(' ').collect();
+        let method = parts.first().map(|s| s.to_string());
+        let target_path = parts
+            .get(1)
+            .filter(|s| s.starts_with('/') && s.len() > 1)
+            .map(|s| s.to_string());
+        let http_version = parts.get(2).map(|s| s.to_string());
+
+        // parse headers
+        let headers: HashMap<String, String> = headers_str
+            .lines()
+            .filter_map(|line| line.split_once(": "))
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
 
         HttpRequest {
             _method: method,
@@ -60,8 +100,11 @@ mod tests {
 
     #[test]
     fn parses_well_formed_request() {
-        let raw = "GET /index.html HTTP/1.1\r\nHost: localhost\r\nUser-Agent: foobar/1.2.3\r\n\r\nHello body";
-        let req = HttpRequest::parse_request(raw);
+        let req = HttpRequest::parse_request(
+            "GET /index.html HTTP/1.1",
+            "Host: localhost\r\nUser-Agent: foobar/1.2.3",
+            Some("Hello body".to_string()),
+        );
 
         assert_eq!(req._method.as_deref(), Some("GET"));
         assert_eq!(req._target_path.as_deref(), Some("/index.html"));
@@ -79,8 +122,11 @@ mod tests {
 
     #[test]
     fn parses_multiple_headers() {
-        let raw = "GET /index.html HTTP/1.1\r\nHost: localhost\r\nUser-Agent: foobar/1.2.3\r\nAccept: */*\r\n\r\n";
-        let req = HttpRequest::parse_request(raw);
+        let req = HttpRequest::parse_request(
+            "GET /index.html HTTP/1.1",
+            "Host: localhost\r\nUser-Agent: foobar/1.2.3\r\nAccept: */*",
+            None,
+        );
 
         assert_eq!(
             req._headers.get("Host").map(|s| s.as_str()),
@@ -95,8 +141,7 @@ mod tests {
 
     #[test]
     fn parses_request_line_only() {
-        let raw = "POST /submit HTTP/1.1";
-        let req = HttpRequest::parse_request(raw);
+        let req = HttpRequest::parse_request("POST /submit HTTP/1.1", "", None);
 
         assert_eq!(req._method.as_deref(), Some("POST"));
         assert_eq!(req._target_path.as_deref(), Some("/submit"));
@@ -107,8 +152,7 @@ mod tests {
 
     #[test]
     fn handles_malformed_request_line() {
-        let raw = "BADREQUEST\r\nHost: localhost";
-        let req = HttpRequest::parse_request(raw);
+        let req = HttpRequest::parse_request("BADREQUEST", "Host: localhost", None);
 
         assert_eq!(req._method.as_deref(), Some("BADREQUEST"));
         assert!(req._target_path.is_none());
@@ -117,7 +161,7 @@ mod tests {
 
     #[test]
     fn handles_empty_input() {
-        let req = HttpRequest::parse_request("");
+        let req = HttpRequest::parse_request("", "", None);
 
         assert_eq!(req._method.as_deref(), Some(""));
         assert!(req._target_path.is_none());
@@ -128,8 +172,7 @@ mod tests {
 
     #[test]
     fn root_path_yields_no_target_path() {
-        let raw = "GET / HTTP/1.1\r\nHost: localhost";
-        let req = HttpRequest::parse_request(raw);
+        let req = HttpRequest::parse_request("GET / HTTP/1.1", "Host: localhost", None);
 
         assert_eq!(req._method.as_deref(), Some("GET"));
         assert!(req._target_path.is_none());
@@ -138,8 +181,7 @@ mod tests {
 
     #[test]
     fn path_without_leading_slash_yields_no_target_path() {
-        let raw = "GET noslash HTTP/1.1";
-        let req = HttpRequest::parse_request(raw);
+        let req = HttpRequest::parse_request("GET noslash HTTP/1.1", "", None);
 
         assert_eq!(req._method.as_deref(), Some("GET"));
         assert!(req._target_path.is_none());

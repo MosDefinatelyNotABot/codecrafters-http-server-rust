@@ -7,7 +7,7 @@ use crate::{
 
 pub(crate) type RequestHandler = Box<dyn Fn(&HttpRequest) -> HttpResponse + Send + Sync>;
 
-// route mapper. maps a path to a handler function.
+/// route mapper. Maps a path + HTTP method to a handler function.
 pub(crate) static ROUTES: LazyLock<HashMap<(String, String), RequestHandler>> =
     LazyLock::new(|| {
         [

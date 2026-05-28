@@ -23,21 +23,21 @@ mod tests {
     #[test]
     fn splits_base_from_single_chunk() {
         let (base, chunks) = path_spilter(&"/echo/hello".to_string()).unwrap();
-        assert_eq!(base, "echo");
+        assert_eq!(base, "/echo");
         assert_eq!(chunks, vec!["hello"]);
     }
 
     #[test]
     fn splits_base_from_multiple_chunks() {
         let (base, chunks) = path_spilter(&"/echo/hello/world/spliter".to_string()).unwrap();
-        assert_eq!(base, "echo");
+        assert_eq!(base, "/echo");
         assert_eq!(chunks, vec!["hello", "world", "spliter"]);
     }
 
     #[test]
     fn base_only_path_yields_empty_chunks() {
         let (base, chunks) = path_spilter(&"/echo".to_string()).unwrap();
-        assert_eq!(base, "echo");
+        assert_eq!(base, "/echo");
         assert!(chunks.is_empty());
     }
 

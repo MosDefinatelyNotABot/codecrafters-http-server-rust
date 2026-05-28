@@ -6,14 +6,15 @@ mod path_splitter;
 mod route_handlers;
 
 use file_utils::{DIR_PATH, get_dir_path};
-use http_request::HttpRequest;
+use http_request::{HttpRequest, fetch_request_str};
 use path_splitter::path_spilter;
 use route_handlers::ROUTES;
 
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
 use std::env;
+use std::pin::Pin;
 
 use crate::http_response::HttpResponse;
 
@@ -46,113 +47,110 @@ async fn main() {
 
 async fn handle_connection(stream: TcpStream) {
     // handles a single client connection
-    println!("Accepted connection from: {}", stream.peer_addr().unwrap());
+    let client_addr = stream.peer_addr().unwrap();
+    println!("[main] Accepted connection from: {}", client_addr);
 
     let (reader, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
-    let mut request_buffer = String::new();
 
-    // read request line and headers
     loop {
-        let mut line = String::new();
-        reader
-            .read_line(&mut line)
-            .await
-            .expect("Error reading request. :(");
-        if line == "\r\n" || line.is_empty() {
-            request_buffer.push_str(&line);
+        // read request into strings
+        let (request_line, headers_buffer, body): (String, String, Option<String>) =
+            fetch_request_str(Pin::new(&mut reader)).await;
+
+        // empty request line means client closed the connection
+        if request_line.is_empty() {
+            println!("[main] Client closed the connection from: {}", client_addr);
             break;
         }
-        request_buffer.push_str(&line);
-    }
 
-    // read body if Content-Length header is present
-    let content_length: usize = request_buffer
-        .lines()
-        .find_map(|l| l.strip_prefix("Content-Length: "))
-        .and_then(|v| v.trim().parse().ok())
-        .unwrap_or(0);
+        // parse request
+        let request: HttpRequest = HttpRequest::parse_request(&request_line, &headers_buffer, body);
 
-    if content_length > 0 {
-        let mut body_buf = vec![0u8; content_length];
-        reader
-            .read_exact(&mut body_buf)
-            .await
-            .expect("Error reading body. :(");
-        request_buffer.push_str(&String::from_utf8_lossy(&body_buf));
-    }
+        println!("[main] Request headers: {:?}", request._headers);
 
-    // parse request
-    let request: HttpRequest = HttpRequest::parse_request(&request_buffer);
+        let close_after_response = request
+            ._headers
+            .get("Connection")
+            .is_some_and(|v| v.eq_ignore_ascii_case("close"));
 
-    // get resposne
-    let mut http_response: HttpResponse = match request._target_path {
-        Some(ref path) => {
-            let (base_path, _path_chunks) = path_spilter(path).unwrap_or_default();
-            let method = request._method.as_deref().unwrap_or("GET").to_string();
-            if ROUTES.contains_key(&(base_path.to_owned(), method.to_owned())) {
-                ROUTES
-                    .get(&(base_path, method))
-                    .expect("Could not find handler")(&request)
-            } else {
-                ROUTES
-                    .get(&("/error".to_string(), "GET".to_string()))
-                    .expect("Could not find error handler")(&request)
+        // get resposne
+        let mut http_response: HttpResponse = match request._target_path {
+            Some(ref path) => {
+                let (base_path, _path_chunks) = path_spilter(path).unwrap_or_default();
+                let method = request._method.as_deref().unwrap_or("GET").to_string();
+                if ROUTES.contains_key(&(base_path.to_owned(), method.to_owned())) {
+                    ROUTES
+                        .get(&(base_path, method))
+                        .expect("Could not find handler")(&request)
+                } else {
+                    ROUTES
+                        .get(&("/error".to_string(), "GET".to_string()))
+                        .expect("Could not find error handler")(&request)
+                }
             }
+            None => ROUTES
+                .get(&("/root".to_string(), "GET".to_string()))
+                .expect("Could not find root handler")(&request),
+        };
+
+        // compress body if necessary
+        let client_compression_support: Vec<&str> = request
+            ._headers
+            .get("Accept-Encoding")
+            .map(|v| v.as_str())
+            .unwrap_or("")
+            .split(", ")
+            .collect::<Vec<&str>>();
+
+        let compression_method: Option<&str> = client_compression_support
+            .iter()
+            .find(|m| compression_utils::COMPRESSION_METHODS.contains_key(**m))
+            .cloned();
+
+        // println!("[main] compression method: {:?}", compression_method);
+
+        if let Some(compression_method) = compression_method {
+            // println!("[main] compressing body");
+
+            http_response.body = Some(compression_utils::compress_data(
+                http_response.body.as_deref().unwrap_or(&[]),
+                Some(compression_method),
+            ));
+
+            // add content encoding header
+            http_response.headers.insert(
+                "Content-Encoding".to_string(),
+                compression_method.to_owned(),
+            );
+
+            // update content length header
+            let compressed_content_length: usize = http_response
+                .body
+                .as_ref()
+                .expect("compressed body is None")
+                .len();
+
+            http_response.headers.insert(
+                "Content-Length".to_string(),
+                compressed_content_length.to_string(),
+            );
         }
-        None => ROUTES
-            .get(&("/root".to_string(), "GET".to_string()))
-            .expect("Could not find root handler")(&request),
-    };
 
-    // compress body if necessary
-    let client_compression_support: Vec<&str> = request
-        ._headers
-        .get("Accept-Encoding")
-        .map(|v| v.as_str())
-        .unwrap_or("")
-        .split(", ")
-        .collect::<Vec<&str>>();
+        println!("[main] resposne headers: {:?}", http_response.headers);
 
-    let compression_method: Option<&str> = client_compression_support
-        .iter()
-        .find(|m| compression_utils::COMPRESSION_METHODS.contains_key(**m))
-        .cloned();
+        // send response
+        writer
+            .write_all(http_response.get_response().as_slice())
+            .await
+            .expect("Error writing response. :(");
 
-    println!("[main] compression method: {:?}", compression_method);
-
-    if let Some(compression_method) = compression_method {
-        println!("[main] compressing body");
-
-        http_response.body = Some(compression_utils::compress_data(
-            http_response.body.as_deref().unwrap_or(&[]),
-            Some(compression_method),
-        ));
-
-        // add content encoding header
-        http_response.headers.insert(
-            "Content-Encoding".to_string(),
-            compression_method.to_owned(),
-        );
-
-        // update content length header
-        let compressed_content_length: usize = http_response
-            .body
-            .as_ref()
-            .expect("compressed body is None")
-            .len();
-
-        http_response.headers.insert(
-            "Content-Length".to_string(),
-            compressed_content_length.to_string(),
-        );
+        if close_after_response {
+            println!(
+                "[main] Closing connection after response from: {}",
+                &client_addr
+            );
+            break;
+        }
     }
-
-    println!("[main] resposne headers: {:?}", http_response.headers);
-
-    // send response
-    writer
-        .write_all(http_response.get_response().as_slice())
-        .await
-        .expect("Error writing response. :(");
 }
