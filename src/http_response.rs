@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 pub(crate) struct HttpResponse {
     pub http_version: String,
     pub status: String,
-    pub headers: Vec<(String, String)>,
+    pub headers: HashMap<String, String>,
     pub body: Option<String>,
 }
 
@@ -10,7 +12,7 @@ impl Default for HttpResponse {
         Self {
             http_version: "HTTP/1.1".to_string(),
             status: "200 OK".to_string(),
-            headers: Vec::new(),
+            headers: HashMap::new(),
             body: None,
         }
     }

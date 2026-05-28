@@ -45,6 +45,7 @@ async fn main() {
 }
 
 async fn handle_connection(stream: TcpStream) {
+    // handles a single client connection
     println!("Accepted connection from: {}", stream.peer_addr().unwrap());
 
     let (reader, mut writer) = tokio::io::split(stream);
@@ -105,9 +106,22 @@ async fn handle_connection(stream: TcpStream) {
     };
 
     // compress body if necessary
-    if let Some(compression_method) = request._headers.get("Accept-Encoding").map(|v| v.as_str())
-        && compression_utils::COMPRESSION_METHODS.contains_key(compression_method)
-    {
+    let client_compression_support: Vec<&str> = request
+        ._headers
+        .get("Accept-Encoding")
+        .map(|v| v.as_str())
+        .unwrap_or("")
+        .split(", ")
+        .collect::<Vec<&str>>();
+
+    let compression_method: Option<&str> = client_compression_support
+        .iter()
+        .find(|m| compression_utils::COMPRESSION_METHODS.contains_key(**m))
+        .cloned();
+
+    println!("[main] compression method: {:?}", compression_method);
+
+    if let Some(compression_method) = compression_method {
         println!("[main] compressing body");
 
         http_response.body = Some(format!(
@@ -122,23 +136,33 @@ async fn handle_connection(stream: TcpStream) {
             )
         ));
 
+        // println!("[main] compressed body: {:?}", http_response.body);
+
         // add content encoding header
-        http_response.headers.push((
+        http_response.headers.insert(
             "Content-Encoding".to_string(),
             compression_method.to_owned(),
-        ));
+        );
 
         // update content length header
-        let compressed_content_length = http_response
+        let compressed_content_length: usize = http_response
             .body
             .as_ref()
-            .map(|b| b.len().to_string())
-            .unwrap_or_default();
+            .expect("compressed body is None")
+            .len();
 
-        http_response
-            .headers
-            .push(("Content-Length".to_string(), compressed_content_length));
+        // println!(
+        //     "[main] compressed body length: {}",
+        //     compressed_content_length
+        // );
+
+        http_response.headers.insert(
+            "Content-Length".to_string(),
+            compressed_content_length.to_string(),
+        );
     }
+
+    println!("[main] resposne headers: {:?}", http_response.headers);
 
     // send response
     writer

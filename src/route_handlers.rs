@@ -1,9 +1,7 @@
 use std::{collections::HashMap, fs, sync::LazyLock};
 
 use crate::{
-    file_utils::DIR_PATH,
-    http_request::HttpRequest,
-    http_response::{self, HttpResponse},
+    file_utils::DIR_PATH, http_request::HttpRequest, http_response::HttpResponse,
     path_splitter::path_spilter,
 };
 
@@ -51,7 +49,7 @@ fn root_handler_get(request: &HttpRequest) -> HttpResponse {
     HttpResponse {
         http_version: "HTTP/1.1".to_string(),
         status: "200 OK".to_string(),
-        headers: vec![],
+        headers: HashMap::new(),
         body: Some("Healthy".to_string()),
     }
 }
@@ -65,7 +63,7 @@ fn error_handler_get(request: &HttpRequest) -> HttpResponse {
     HttpResponse {
         http_version: "HTTP/1.1".to_string(),
         status: "404 Not Found".to_string(),
-        headers: vec![],
+        headers: HashMap::new(),
         body: None,
     }
 }
@@ -86,10 +84,10 @@ fn echo_handler(request: &HttpRequest) -> HttpResponse {
     HttpResponse {
         http_version: "HTTP/1.1".to_string(),
         status: "200 OK".to_string(),
-        headers: vec![
+        headers: HashMap::from_iter([
             ("Content-Type".to_string(), "text/plain".to_string()),
             ("Content-Length".to_string(), body.len().to_string()),
-        ],
+        ]),
         body: Some(body),
     }
 }
@@ -104,17 +102,15 @@ fn user_agent_handler_get(request: &HttpRequest) -> HttpResponse {
     if let Some(user_agent) = request._headers.get("User-Agent") {
         println!("[user_agent_handler_get] User-Agent: {:?}", user_agent);
 
-        let http_response = http_response::HttpResponse {
+        HttpResponse {
             http_version: "HTTP/1.1".to_string(),
             status: "200 OK".to_string(),
-            headers: vec![
+            headers: HashMap::from_iter([
                 ("Content-Type".to_string(), "text/plain".to_string()),
                 ("Content-Length".to_string(), user_agent.len().to_string()),
-            ],
+            ]),
             body: Some(user_agent.to_owned()),
-        };
-
-        http_response
+        }
     } else {
         println!("[user_agent_handler_get] User-Agent header not found, returning 404");
         error_handler_get(request)
@@ -172,20 +168,18 @@ fn files_handler_get(request: &HttpRequest) -> HttpResponse {
         let content_length = bytes.len();
         println!("[files_handler_get] read {} bytes", content_length);
 
-        let http_response = http_response::HttpResponse {
+        HttpResponse {
             http_version: "HTTP/1.1".to_string(),
             status: "200 OK".to_string(),
-            headers: vec![
+            headers: HashMap::from_iter([
                 (
                     "Content-Type".to_string(),
                     "application/octet-stream".to_string(),
                 ),
                 ("Content-Length".to_string(), content_length.to_string()),
-            ],
+            ]),
             body: Some(String::from_utf8_lossy(&bytes).into_owned()),
-        };
-
-        http_response
+        }
     } else {
         println!("[files_handler_get] file not found, returning 404");
         error_handler_get(request)
@@ -246,16 +240,12 @@ fn file_handler_post(request: &HttpRequest) -> HttpResponse {
     );
 
     match fs::write(file_path, file_contents) {
-        Ok(_) => {
-            let http_response = http_response::HttpResponse {
-                http_version: "HTTP/1.1".to_string(),
-                status: "201 Created".to_string(),
-                headers: vec![],
-                body: None,
-            };
-
-            http_response
-        }
+        Ok(_) => HttpResponse {
+            http_version: "HTTP/1.1".to_string(),
+            status: "201 Created".to_string(),
+            headers: HashMap::new(),
+            body: None,
+        },
         Err(e) => {
             println!(
                 "[file_handler_post] failed to write file: {}, returning 404",
