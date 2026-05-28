@@ -75,7 +75,7 @@ async fn handle_connection(stream: TcpStream) {
             .get("Connection")
             .is_some_and(|v| v.eq_ignore_ascii_case("close"));
 
-        // get resposne
+        // get response
         let mut http_response: HttpResponse = match request._target_path {
             Some(ref path) => {
                 let (base_path, path_args) = path_spilter(path).unwrap_or_default();
