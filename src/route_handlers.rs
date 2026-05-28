@@ -50,7 +50,7 @@ fn root_handler_get(request: &HttpRequest) -> HttpResponse {
         http_version: "HTTP/1.1".to_string(),
         status: "200 OK".to_string(),
         headers: HashMap::new(),
-        body: Some("Healthy".to_string()),
+        body: Some(b"Healthy".to_vec()),
     }
 }
 
@@ -88,7 +88,7 @@ fn echo_handler(request: &HttpRequest) -> HttpResponse {
             ("Content-Type".to_string(), "text/plain".to_string()),
             ("Content-Length".to_string(), body.len().to_string()),
         ]),
-        body: Some(body),
+        body: Some(body.into_bytes()),
     }
 }
 
@@ -109,7 +109,7 @@ fn user_agent_handler_get(request: &HttpRequest) -> HttpResponse {
                 ("Content-Type".to_string(), "text/plain".to_string()),
                 ("Content-Length".to_string(), user_agent.len().to_string()),
             ]),
-            body: Some(user_agent.to_owned()),
+            body: Some(user_agent.to_owned().into_bytes()),
         }
     } else {
         println!("[user_agent_handler_get] User-Agent header not found, returning 404");
@@ -178,7 +178,7 @@ fn files_handler_get(request: &HttpRequest) -> HttpResponse {
                 ),
                 ("Content-Length".to_string(), content_length.to_string()),
             ]),
-            body: Some(String::from_utf8_lossy(&bytes).into_owned()),
+            body: Some(bytes),
         }
     } else {
         println!("[files_handler_get] file not found, returning 404");

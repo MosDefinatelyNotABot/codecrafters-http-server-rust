@@ -124,19 +124,10 @@ async fn handle_connection(stream: TcpStream) {
     if let Some(compression_method) = compression_method {
         println!("[main] compressing body");
 
-        http_response.body = Some(format!(
-            "{:?}",
-            compression_utils::compress_data(
-                http_response
-                    .body
-                    .as_ref()
-                    .map(|b| b.as_bytes())
-                    .unwrap_or_default(),
-                Some(compression_method)
-            )
+        http_response.body = Some(compression_utils::compress_data(
+            http_response.body.as_deref().unwrap_or(&[]),
+            Some(compression_method),
         ));
-
-        // println!("[main] compressed body: {:?}", http_response.body);
 
         // add content encoding header
         http_response.headers.insert(
@@ -151,11 +142,6 @@ async fn handle_connection(stream: TcpStream) {
             .expect("compressed body is None")
             .len();
 
-        // println!(
-        //     "[main] compressed body length: {}",
-        //     compressed_content_length
-        // );
-
         http_response.headers.insert(
             "Content-Length".to_string(),
             compressed_content_length.to_string(),
@@ -166,7 +152,7 @@ async fn handle_connection(stream: TcpStream) {
 
     // send response
     writer
-        .write_all(http_response.get_response().as_bytes())
+        .write_all(http_response.get_response().as_slice())
         .await
         .expect("Error writing response. :(");
 }

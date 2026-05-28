@@ -4,7 +4,7 @@ pub(crate) struct HttpResponse {
     pub http_version: String,
     pub status: String,
     pub headers: HashMap<String, String>,
-    pub body: Option<String>,
+    pub body: Option<Vec<u8>>,
 }
 
 impl Default for HttpResponse {
@@ -19,7 +19,7 @@ impl Default for HttpResponse {
 }
 
 impl HttpResponse {
-    pub fn get_response(&self) -> String {
+    pub fn get_response(&self) -> Vec<u8> {
         // for more complicated resposnes.
         let headers = self
             .headers
@@ -27,12 +27,16 @@ impl HttpResponse {
             .map(|(k, v)| format!("{}: {}", k, v))
             .collect::<Vec<_>>()
             .join("\r\n");
-        format!(
-            "{} {}\r\n{}\r\n\r\n{}",
-            self.http_version,
-            self.status,
-            headers,
-            self.body.as_deref().unwrap_or_default()
-        )
+
+        let head = format!(
+            "{} {}\r\n{}\r\n\r\n",
+            self.http_version, self.status, headers
+        );
+
+        let mut response = head.into_bytes();
+        if let Some(body) = &self.body {
+            response.extend(body);
+        }
+        response
     }
 }
