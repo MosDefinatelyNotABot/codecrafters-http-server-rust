@@ -11,13 +11,13 @@ Along the way you'll learn about TCP servers,
 [HTTP request syntax](https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html),
 and more.
 
-Stages Completed:
+# Stages Completed:
 
 - [X] stage 1: Basic HTTP 1.1 server with support for concurrent connections, GET and POST methods
 - [X] HTTP compression
 - [X] Persistent TCP connections
 
-Extensions:
+# Extensions:
 
 - [ ] HTTP 2.x
 - [ ] HTTPS
